@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>습지 보전 의사결정 지원 시스템 (공주대-군산대)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            height: 700px; /* 차트 높이 증가 */
+            width: 100%;
+        }
+        .map-container {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+        }
+        .map-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <!-- 페이지 헤더 -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">대체/복원습지 우선순위 의사결정 지원 시스템</h1>
+            <p class="mt-2 text-lg text-gray-600">가중치를 조절하여 최적의 보전 대상지를 선정해 보세요.</p>
+        </div>
+
+        <!-- 제어 패널 -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+            <h2 class="text-2xl font-semibold mb-4 border-b pb-2">의사결정 요소 설정</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-8">
+                <!-- 1. 대권역 선택 -->
+                <div>
+                    <label for="basin-select" class="block text-sm font-medium text-gray-700 mb-1">1. 대권역 선택</label>
+                    <select id="basin-select" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        <!-- 옵션은 스크립트에서 동적으로 채워집니다 -->
+                    </select>
+                </div>
+                <!-- 2. 가중치 입력 -->
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">2. 가중치 입력 (합계 100%)</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+                        <div class="flex items-center space-x-2">
+                            <label for="weight-connectivity" class="text-sm min-w-[100px]">서식처 연결성:</label>
+                            <input type="number" id="weight-connectivity" value="25" min="0" max="100" class="w-full p-2 border border-gray-300 rounded-md text-center">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <label for="weight-habitat" class="text-sm min-w-[100px]">서식처 기능향상:</label>
+                            <input type="number" id="weight-habitat" value="25" min="0" max="100" class="w-full p-2 border border-gray-300 rounded-md text-center">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <label for="weight-hydrology" class="text-sm min-w-[100px]">수문학적 기능:</label>
+                            <input type="number" id="weight-hydrology" value="25" min="0" max="100" class="w-full p-2 border border-gray-300 rounded-md text-center">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <label for="weight-cost" class="text-sm min-w-[100px]">복원 비용:</label>
+                            <input type="number" id="weight-cost" value="25" min="0" max="100" class="w-full p-2 border border-gray-300 rounded-md text-center">
+                        </div>
+                    </div>
+                     <div id="weight-warning" class="text-red-500 text-sm h-4 mt-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 결과 시각화 -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+            <h2 class="text-2xl font-semibold mb-4 border-b pb-2">종합 평가 결과</h2>
+            <!-- 1. 종합 순위 그래프 -->
+            <div class="mb-8">
+                <h3 id="chart-title" class="text-xl font-medium mb-3">종합 순위 그래프</h3>
+                <div class="chart-container">
+                    <canvas id="resultChart"></canvas>
+                </div>
+            </div>
+            <!-- 2. 상세 데이터 테이블 -->
+            <div>
+                <h3 id="table-title" class="text-xl font-medium mb-3">상세 데이터</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">순위</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">유역명</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">연결성</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">기능 향상</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">수문 기능</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">복원 비용</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider bg-indigo-100">최종 점수</th>
+                            </tr>
+                        </thead>
+                        <tbody id="result-table-body" class="bg-white divide-y divide-gray-200">
+                            <!-- 데이터가 여기에 동적으로 삽입됩니다. -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 지도 정보 섹션 -->
+        <div class="bg-white p-6 rounded-xl shadow-md">
+            <h2 class="text-2xl font-semibold mb-4 border-b pb-2">습지 공간지도정보</h2>
+            <p class="text-gray-600 mb-4">선택된 유역의 공간적 분포를 확인합니다. (예: 집수역 시각화)</p>
+            <div class="map-container rounded-lg">
+                <iframe
+                    src="https://maps.google.com/maps?q=우포늪&t=&z=12&ieUTF8&iwloc=&output=embed"
+                    loading="lazy">
+                </iframe>
+            </div>
+        </div>
+
+        <footer class="text-center mt-8 text-sm text-gray-500">
+            <p>본 페이지는 시연용으로 제작되었으며, 일부 데이터는 임시자료 입니다. </p>
+        </footer>
+    </div>
+
+    <script>
+        // --- CSV 데이터 연동 ---
+        //  CSV 파일의 전체 432개 데이터를 JavaScript 배열로 변환하여 사용합니다. (임시)
+        const watershedData = [
+            {"SBSNNM":"서낙동강","BBSNCD_한글":"낙동강권역","connectivity_rank":100,"past_wet_rank":100,"hydrology_rank":100,"restoration_price_rank":10.7},
+            {"SBSNNM":"양산천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":98.6,"past_wet_rank":97.2,"hydrology_rank":97.2,"restoration_price_rank":7.5},
+            {"SBSNNM":"조만강","BBSNCD_한글":"낙동강권역","connectivity_rank":99,"past_wet_rank":99.7,"hydrology_rank":99.7,"restoration_price_rank":23.9},
+            {"SBSNNM":"화정천","BBSNCD_한글":"한강권역","connectivity_rank":94.4,"past_wet_rank":85.1,"hydrology_rank":85.1,"restoration_price_rank":4.7},
+            {"SBSNNM":"사천천","BBSNCD_한글":"한강권역","connectivity_rank":95.1,"past_wet_rank":94.6,"hydrology_rank":94.6,"restoration_price_rank":16.3},
+            {"SBSNNM":"태화강","BBSNCD_한글":"낙동강권역","connectivity_rank":88.1,"past_wet_rank":86.5,"hydrology_rank":86.5,"restoration_price_rank":1.9},
+            {"SBSNNM":"오목천","BBSNCD_한글":"낙동강권역","connectivity_rank":91.4,"past_wet_rank":97.9,"hydrology_rank":97.9,"restoration_price_rank":17.2},
+            {"SBSNNM":"홍제천합류전","BBSNCD_한글":"한강권역","connectivity_rank":93.2,"past_wet_rank":79.3,"hydrology_rank":79.3,"restoration_price_rank":0.5},
+            {"SBSNNM":"화포천","BBSNCD_한글":"낙동강권역","connectivity_rank":99.5,"past_wet_rank":99,"hydrology_rank":99,"restoration_price_rank":27.7},
+            {"SBSNNM":"동촌수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":87,"past_wet_rank":88.1,"hydrology_rank":88.1,"restoration_price_rank":5.4},
+            {"SBSNNM":"고부천하류","BBSNCD_한글":"금강권역","connectivity_rank":92.3,"past_wet_rank":91.6,"hydrology_rank":91.6,"restoration_price_rank":14.4},
+            {"SBSNNM":"구포수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":96.2,"past_wet_rank":90.9,"hydrology_rank":90.9,"restoration_price_rank":18.4},
+            {"SBSNNM":"중랑천하류","BBSNCD_한글":"한강권역","connectivity_rank":85.3,"past_wet_rank":80.2,"hydrology_rank":80.2,"restoration_price_rank":2.4},
+            {"SBSNNM":"아라천","BBSNCD_한글":"한강권역","connectivity_rank":95.3,"past_wet_rank":87,"hydrology_rank":87,"restoration_price_rank":19.3},
+            {"SBSNNM":"형산강하류","BBSNCD_한글":"낙동강권역","connectivity_rank":82.1,"past_wet_rank":90,"hydrology_rank":90,"restoration_price_rank":9.3},
+            {"SBSNNM":"창녕합천보","BBSNCD_한글":"낙동강권역","connectivity_rank":93.7,"past_wet_rank":96.2,"hydrology_rank":96.2,"restoration_price_rank":27.4},
+            {"SBSNNM":"황룡강합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":93,"past_wet_rank":81.4,"hydrology_rank":81.4,"restoration_price_rank":12.8},
+            {"SBSNNM":"만경강하류","BBSNCD_한글":"금강권역","connectivity_rank":87.9,"past_wet_rank":94.8,"hydrology_rank":94.8,"restoration_price_rank":21.2},
+            {"SBSNNM":"만경강중류","BBSNCD_한글":"금강권역","connectivity_rank":91.8,"past_wet_rank":93.7,"hydrology_rank":93.7,"restoration_price_rank":28.4},
+            {"SBSNNM":"신천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":74.4,"past_wet_rank":80.5,"hydrology_rank":80.5,"restoration_price_rank":1.7},
+            {"SBSNNM":"원동천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":98.1,"past_wet_rank":96,"hydrology_rank":96,"restoration_price_rank":41.3},
+            {"SBSNNM":"광주수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":94.6,"past_wet_rank":69.3,"hydrology_rank":69.3,"restoration_price_rank":11.2},
+            {"SBSNNM":"낙동강하구언","BBSNCD_한글":"낙동강권역","connectivity_rank":80.9,"past_wet_rank":98.1,"hydrology_rank":98.1,"restoration_price_rank":26.7},
+            {"SBSNNM":"반성천합류후","BBSNCD_한글":"낙동강권역","connectivity_rank":80.7,"past_wet_rank":82.8,"hydrology_rank":82.8,"restoration_price_rank":12.3},
+            {"SBSNNM":"월촌수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":89.5,"past_wet_rank":89,"hydrology_rank":89,"restoration_price_rank":28.8},
+            {"SBSNNM":"한천합류후","BBSNCD_한글":"낙동강권역","connectivity_rank":84.9,"past_wet_rank":83.7,"hydrology_rank":83.7,"restoration_price_rank":19.8},
+            {"SBSNNM":"곡강천","BBSNCD_한글":"낙동강권역","connectivity_rank":69.3,"past_wet_rank":87.9,"hydrology_rank":87.9,"restoration_price_rank":8.4},
+            {"SBSNNM":"황구지천상류","BBSNCD_한글":"한강권역","connectivity_rank":76.1,"past_wet_rank":80.9,"hydrology_rank":80.9,"restoration_price_rank":8.9},
+            {"SBSNNM":"전주천하류","BBSNCD_한글":"금강권역","connectivity_rank":81.6,"past_wet_rank":77.2,"hydrology_rank":77.2,"restoration_price_rank":11.4},
+            {"SBSNNM":"남강하류","BBSNCD_한글":"낙동강권역","connectivity_rank":99.7,"past_wet_rank":98.8,"hydrology_rank":98.8,"restoration_price_rank":52.5},
+            {"SBSNNM":"주천강","BBSNCD_한글":"낙동강권역","connectivity_rank":64.5,"past_wet_rank":94.1,"hydrology_rank":94.1,"restoration_price_rank":13},
+            {"SBSNNM":"세종보","BBSNCD_한글":"금강권역","connectivity_rank":92.8,"past_wet_rank":61.2,"hydrology_rank":61.2,"restoration_price_rank":8.6},
+            {"SBSNNM":"새만금방조제","BBSNCD_한글":"금강권역","connectivity_rank":97.9,"past_wet_rank":99.3,"hydrology_rank":99.3,"restoration_price_rank":52},
+            {"SBSNNM":"밀양강","BBSNCD_한글":"낙동강권역","connectivity_rank":97.2,"past_wet_rank":98.6,"hydrology_rank":98.6,"restoration_price_rank":51.6},
+            {"SBSNNM":"청량천","BBSNCD_한글":"낙동강권역","connectivity_rank":83.9,"past_wet_rank":85.6,"hydrology_rank":85.6,"restoration_price_rank":26.5},
+            {"SBSNNM":"수어천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":95.5,"past_wet_rank":95.3,"hydrology_rank":95.3,"restoration_price_rank":48.1},
+            {"SBSNNM":"중랑천합류전","BBSNCD_한글":"한강권역","connectivity_rank":80.2,"past_wet_rank":68.2,"hydrology_rank":68.2,"restoration_price_rank":7},
+            {"SBSNNM":"탑천","BBSNCD_한글":"금강권역","connectivity_rank":98.8,"past_wet_rank":99.5,"hydrology_rank":99.5,"restoration_price_rank":58.3},
+            {"SBSNNM":"고령교수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":78.6,"past_wet_rank":77.7,"hydrology_rank":77.7,"restoration_price_rank":17.9},
+            {"SBSNNM":"청통천","BBSNCD_한글":"낙동강권역","connectivity_rank":73,"past_wet_rank":87.2,"hydrology_rank":87.2,"restoration_price_rank":22.6},
+            {"SBSNNM":"원평천","BBSNCD_한글":"금강권역","connectivity_rank":91.1,"past_wet_rank":91.1,"hydrology_rank":91.1,"restoration_price_rank":45.8},
+            {"SBSNNM":"석교천","BBSNCD_한글":"낙동강권역","connectivity_rank":85.1,"past_wet_rank":85.8,"hydrology_rank":85.8,"restoration_price_rank":35.8},
+            {"SBSNNM":"함안천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":96.9,"past_wet_rank":92.8,"hydrology_rank":92.8,"restoration_price_rank":55},
+            {"SBSNNM":"계성천","BBSNCD_한글":"낙동강권역","connectivity_rank":98.3,"past_wet_rank":97.4,"hydrology_rank":97.4,"restoration_price_rank":61.8},
+            {"SBSNNM":"행주대교수위표","BBSNCD_한글":"한강권역","connectivity_rank":75.4,"past_wet_rank":64.7,"hydrology_rank":64.7,"restoration_price_rank":6.5},
+            {"SBSNNM":"강청수위표","BBSNCD_한글":"금강권역","connectivity_rank":79.1,"past_wet_rank":79.5,"hydrology_rank":79.5,"restoration_price_rank":25.1},
+            {"SBSNNM":"청계천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":70.3,"past_wet_rank":74.2,"hydrology_rank":74.2,"restoration_price_rank":11.9},
+            {"SBSNNM":"청도천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":83.2,"past_wet_rank":80,"hydrology_rank":80,"restoration_price_rank":30.7},
+            {"SBSNNM":"팔당댐하류","BBSNCD_한글":"한강권역","connectivity_rank":58.2,"past_wet_rank":78.1,"hydrology_rank":78.1,"restoration_price_rank":4},
+            {"SBSNNM":"함안천","BBSNCD_한글":"낙동강권역","connectivity_rank":87.7,"past_wet_rank":83.2,"hydrology_rank":83.2,"restoration_price_rank":38.8},
+            {"SBSNNM":"광려천","BBSNCD_한글":"낙동강권역","connectivity_rank":92.5,"past_wet_rank":85.3,"hydrology_rank":85.3,"restoration_price_rank":46},
+            {"SBSNNM":"상운천","BBSNCD_한글":"한강권역","connectivity_rank":86.3,"past_wet_rank":83,"hydrology_rank":83,"restoration_price_rank":38.6},
+            {"SBSNNM":"승촌보","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":93.9,"past_wet_rank":87.7,"hydrology_rank":87.7,"restoration_price_rank":51.1},
+            {"SBSNNM":"영산포수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":96.5,"past_wet_rank":92.3,"hydrology_rank":92.3,"restoration_price_rank":59.7},
+            {"SBSNNM":"옥서면","BBSNCD_한글":"금강권역","connectivity_rank":81.9,"past_wet_rank":96.7,"hydrology_rank":96.7,"restoration_price_rank":50.2},
+            {"SBSNNM":"이천","BBSNCD_한글":"낙동강권역","connectivity_rank":80,"past_wet_rank":64,"hydrology_rank":64,"restoration_price_rank":16.1},
+            {"SBSNNM":"합천수위표하류","BBSNCD_한글":"낙동강권역","connectivity_rank":89.3,"past_wet_rank":77.9,"hydrology_rank":77.9,"restoration_price_rank":40},
+            {"SBSNNM":"금호강시점","BBSNCD_한글":"낙동강권역","connectivity_rank":87.4,"past_wet_rank":89.5,"hydrology_rank":89.5,"restoration_price_rank":50.4},
+            {"SBSNNM":"서천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":84.4,"past_wet_rank":54.2,"hydrology_rank":54.2,"restoration_price_rank":13.5},
+            {"SBSNNM":"영산강하구언","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":80.5,"past_wet_rank":71.9,"hydrology_rank":71.9,"restoration_price_rank":28.1},
+            {"SBSNNM":"밀양강합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":83.5,"past_wet_rank":93,"hydrology_rank":93,"restoration_price_rank":52.3},
+            {"SBSNNM":"함평천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":71.9,"past_wet_rank":71.4,"hydrology_rank":71.4,"restoration_price_rank":19.1},
+            {"SBSNNM":"여주보","BBSNCD_한글":"한강권역","connectivity_rank":90.7,"past_wet_rank":78.6,"hydrology_rank":78.6,"restoration_price_rank":45.5},
+            {"SBSNNM":"소양천","BBSNCD_한글":"금강권역","connectivity_rank":74.7,"past_wet_rank":66.8,"hydrology_rank":66.8,"restoration_price_rank":17.7},
+            {"SBSNNM":"삼호수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":69.6,"past_wet_rank":63.8,"hydrology_rank":63.8,"restoration_price_rank":11},
+            {"SBSNNM":"금호강상류","BBSNCD_한글":"낙동강권역","connectivity_rank":89.7,"past_wet_rank":89.7,"hydrology_rank":89.7,"restoration_price_rank":57.4},
+            {"SBSNNM":"신평천","BBSNCD_한글":"금강권역","connectivity_rank":85.8,"past_wet_rank":93.9,"hydrology_rank":93.9,"restoration_price_rank":57.8},
+            {"SBSNNM":"마수원수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":95.8,"past_wet_rank":93.5,"hydrology_rank":93.5,"restoration_price_rank":68.5},
+            {"SBSNNM":"경포천","BBSNCD_한글":"금강권역","connectivity_rank":90.2,"past_wet_rank":62.8,"hydrology_rank":62.8,"restoration_price_rank":33.5},
+            {"SBSNNM":"금강하구언","BBSNCD_한글":"금강권역","connectivity_rank":97.4,"past_wet_rank":95.8,"hydrology_rank":95.8,"restoration_price_rank":74.3},
+            {"SBSNNM":"입포수위표","BBSNCD_한글":"금강권역","connectivity_rank":97.6,"past_wet_rank":97.6,"hydrology_rank":97.6,"restoration_price_rank":76.6},
+            {"SBSNNM":"금천","BBSNCD_한글":"금강권역","connectivity_rank":99.3,"past_wet_rank":98.3,"hydrology_rank":98.3,"restoration_price_rank":80.3},
+            {"SBSNNM":"고부천상류","BBSNCD_한글":"금강권역","connectivity_rank":94.8,"past_wet_rank":96.9,"hydrology_rank":96.9,"restoration_price_rank":75},
+            {"SBSNNM":"섬진강하류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":88.6,"past_wet_rank":84.2,"hydrology_rank":84.2,"restoration_price_rank":56.2},
+            {"SBSNNM":"황구지천하류","BBSNCD_한글":"한강권역","connectivity_rank":77.2,"past_wet_rank":54.7,"hydrology_rank":54.7,"restoration_price_rank":15.8},
+            {"SBSNNM":"주상천","BBSNCD_한글":"금강권역","connectivity_rank":76.5,"past_wet_rank":87.4,"hydrology_rank":87.4,"restoration_price_rank":47.8},
+            {"SBSNNM":"율촌천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":61,"past_wet_rank":69.8,"hydrology_rank":69.8,"restoration_price_rank":14.9},
+            {"SBSNNM":"주수천","BBSNCD_한글":"한강권역","connectivity_rank":86.5,"past_wet_rank":76.5,"hydrology_rank":76.5,"restoration_price_rank":47.4},
+            {"SBSNNM":"용곡수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":82.8,"past_wet_rank":88.6,"hydrology_rank":88.6,"restoration_price_rank":56.4},
+            {"SBSNNM":"군선천","BBSNCD_한글":"한강권역","connectivity_rank":87.2,"past_wet_rank":82.5,"hydrology_rank":82.5,"restoration_price_rank":56},
+            {"SBSNNM":"대천","BBSNCD_한글":"낙동강권역","connectivity_rank":78.8,"past_wet_rank":91.4,"hydrology_rank":91.4,"restoration_price_rank":56.9},
+            {"SBSNNM":"감천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":58.7,"past_wet_rank":70,"hydrology_rank":70,"restoration_price_rank":15.4},
+            {"SBSNNM":"조동수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":61.2,"past_wet_rank":70.3,"hydrology_rank":70.3,"restoration_price_rank":20.2},
+            {"SBSNNM":"논산천하류","BBSNCD_한글":"금강권역","connectivity_rank":66.8,"past_wet_rank":79.1,"hydrology_rank":79.1,"restoration_price_rank":34.6},
+            {"SBSNNM":"영천강","BBSNCD_한글":"낙동강권역","connectivity_rank":94.1,"past_wet_rank":60.3,"hydrology_rank":60.3,"restoration_price_rank":43.4},
+            {"SBSNNM":"고현천","BBSNCD_한글":"낙동강권역","connectivity_rank":83.7,"past_wet_rank":81.9,"hydrology_rank":81.9,"restoration_price_rank":55.3},
+            {"SBSNNM":"창릉천","BBSNCD_한글":"한강권역","connectivity_rank":77.7,"past_wet_rank":50.8,"hydrology_rank":50.8,"restoration_price_rank":18.6},
+            {"SBSNNM":"삽교천중류","BBSNCD_한글":"금강권역","connectivity_rank":92.1,"past_wet_rank":92.5,"hydrology_rank":92.5,"restoration_price_rank":75.5},
+            {"SBSNNM":"칠평천","BBSNCD_한글":"낙동강권역","connectivity_rank":74,"past_wet_rank":89.3,"hydrology_rank":89.3,"restoration_price_rank":54.6},
+            {"SBSNNM":"적포교수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":90.9,"past_wet_rank":96.5,"hydrology_rank":96.5,"restoration_price_rank":79.4},
+            {"SBSNNM":"현풍수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":67.2,"past_wet_rank":65.6,"hydrology_rank":65.6,"restoration_price_rank":25.8},
+            {"SBSNNM":"영암천합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":96,"past_wet_rank":94.4,"hydrology_rank":94.4,"restoration_price_rank":84.5},
+            {"SBSNNM":"신천합류후","BBSNCD_한글":"낙동강권역","connectivity_rank":65.6,"past_wet_rank":82.3,"hydrology_rank":82.3,"restoration_price_rank":43.2},
+            {"SBSNNM":"충주댐하류","BBSNCD_한글":"한강권역","connectivity_rank":72.1,"past_wet_rank":64.2,"hydrology_rank":64.2,"restoration_price_rank":32.8},
+            {"SBSNNM":"대천천","BBSNCD_한글":"금강권역","connectivity_rank":81.4,"past_wet_rank":77.4,"hydrology_rank":77.4,"restoration_price_rank":55.5},
+            {"SBSNNM":"미호천하류","BBSNCD_한글":"금강권역","connectivity_rank":65.8,"past_wet_rank":72.8,"hydrology_rank":72.8,"restoration_price_rank":37.9},
+            {"SBSNNM":"서면수위표","BBSNCD_한글":"한강권역","connectivity_rank":75.1,"past_wet_rank":49.1,"hydrology_rank":49.1,"restoration_price_rank":23.7},
+            {"SBSNNM":"남천","BBSNCD_한글":"낙동강권역","connectivity_rank":70.7,"past_wet_rank":75.6,"hydrology_rank":75.6,"restoration_price_rank":46.2},
+            {"SBSNNM":"판교천","BBSNCD_한글":"금강권역","connectivity_rank":85.6,"past_wet_rank":92.1,"hydrology_rank":92.1,"restoration_price_rank":78.2},
+            {"SBSNNM":"구미보","BBSNCD_한글":"낙동강권역","connectivity_rank":82.3,"past_wet_rank":75.8,"hydrology_rank":75.8,"restoration_price_rank":59},
+            {"SBSNNM":"진동수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":84.6,"past_wet_rank":62.4,"hydrology_rank":62.4,"restoration_price_rank":48.5},
+            {"SBSNNM":"합천수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":96.7,"past_wet_rank":90.7,"hydrology_rank":90.7,"restoration_price_rank":90.1},
+            {"SBSNNM":"함안창녕보","BBSNCD_한글":"낙동강권역","connectivity_rank":68.6,"past_wet_rank":72.6,"hydrology_rank":72.6,"restoration_price_rank":44.1},
+            {"SBSNNM":"기계천","BBSNCD_한글":"낙동강권역","connectivity_rank":91.6,"past_wet_rank":65.8,"hydrology_rank":65.8,"restoration_price_rank":61.1},
+            {"SBSNNM":"안강수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":57.7,"past_wet_rank":78.4,"hydrology_rank":78.4,"restoration_price_rank":40.2},
+            {"SBSNNM":"정읍천","BBSNCD_한글":"금강권역","connectivity_rank":66.3,"past_wet_rank":76.1,"hydrology_rank":76.1,"restoration_price_rank":47.1},
+            {"SBSNNM":"봉당천","BBSNCD_한글":"금강권역","connectivity_rank":88.3,"past_wet_rank":78.8,"hydrology_rank":78.8,"restoration_price_rank":72.2},
+            {"SBSNNM":"영암천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":93.5,"past_wet_rank":90.4,"hydrology_rank":90.4,"restoration_price_rank":89.4},
+            {"SBSNNM":"나주수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":76.7,"past_wet_rank":70.5,"hydrology_rank":70.5,"restoration_price_rank":53},
+            {"SBSNNM":"삼포강","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":90.4,"past_wet_rank":91.8,"hydrology_rank":91.8,"restoration_price_rank":88.9},
+            {"SBSNNM":"온양천","BBSNCD_한글":"금강권역","connectivity_rank":71.4,"past_wet_rank":35.2,"hydrology_rank":35.2,"restoration_price_rank":14},
+            {"SBSNNM":"석화수위표","BBSNCD_한글":"금강권역","connectivity_rank":64,"past_wet_rank":51.2,"hydrology_rank":51.2,"restoration_price_rank":23.3},
+            {"SBSNNM":"황룡강하류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":71.2,"past_wet_rank":57.5,"hydrology_rank":57.5,"restoration_price_rank":37.2},
+            {"SBSNNM":"연곡천","BBSNCD_한글":"한강권역","connectivity_rank":77.9,"past_wet_rank":82.1,"hydrology_rank":82.1,"restoration_price_rank":69.9},
+            {"SBSNNM":"공산댐","BBSNCD_한글":"낙동강권역","connectivity_rank":79.3,"past_wet_rank":31.7,"hydrology_rank":31.7,"restoration_price_rank":21.6},
+            {"SBSNNM":"장수천","BBSNCD_한글":"한강권역","connectivity_rank":70.9,"past_wet_rank":47.5,"hydrology_rank":47.5,"restoration_price_rank":29.7},
+            {"SBSNNM":"진위천합류전","BBSNCD_한글":"한강권역","connectivity_rank":62.4,"past_wet_rank":37.3,"hydrology_rank":37.3,"restoration_price_rank":12.1},
+            {"SBSNNM":"익산천","BBSNCD_한글":"금강권역","connectivity_rank":62.6,"past_wet_rank":88.8,"hydrology_rank":88.8,"restoration_price_rank":65},
+            {"SBSNNM":"동진강하류","BBSNCD_한글":"금강권역","connectivity_rank":78.1,"past_wet_rank":86,"hydrology_rank":86,"restoration_price_rank":78},
+            {"SBSNNM":"병성천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":71.6,"past_wet_rank":73.7,"hydrology_rank":73.7,"restoration_price_rank":59.4},
+            {"SBSNNM":"황룡강중류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":77.4,"past_wet_rank":45.9,"hydrology_rank":45.9,"restoration_price_rank":37.6},
+            {"SBSNNM":"송산면","BBSNCD_한글":"한강권역","connectivity_rank":59.6,"past_wet_rank":62.1,"hydrology_rank":62.1,"restoration_price_rank":36.5},
+            {"SBSNNM":"삼율천","BBSNCD_한글":"낙동강권역","connectivity_rank":62.1,"past_wet_rank":70.9,"hydrology_rank":70.9,"restoration_price_rank":48.3},
+            {"SBSNNM":"미호천상류","BBSNCD_한글":"금강권역","connectivity_rank":58.4,"past_wet_rank":69.1,"hydrology_rank":69.1,"restoration_price_rank":43},
+            {"SBSNNM":"강경천","BBSNCD_한글":"금강권역","connectivity_rank":70,"past_wet_rank":86.3,"hydrology_rank":86.3,"restoration_price_rank":73.1},
+            {"SBSNNM":"청초천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":95.1,"hydrology_rank":95.1,"restoration_price_rank":12.6},
+            {"SBSNNM":"남대천","BBSNCD_한글":"낙동강권역","connectivity_rank":77,"past_wet_rank":72.1,"hydrology_rank":72.1,"restoration_price_rank":67.3},
+            {"SBSNNM":"정암수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":78.4,"past_wet_rank":66.3,"hydrology_rank":66.3,"restoration_price_rank":63.2},
+            {"SBSNNM":"양곡천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":90.2,"hydrology_rank":90.2,"restoration_price_rank":9.8},
+            {"SBSNNM":"쌍계천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":79.5,"past_wet_rank":84.4,"hydrology_rank":84.4,"restoration_price_rank":85.2},
+            {"SBSNNM":"하동2수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":79.8,"past_wet_rank":68.9,"hydrology_rank":68.9,"restoration_price_rank":70.1},
+            {"SBSNNM":"횡천강","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":89,"past_wet_rank":68.4,"hydrology_rank":68.4,"restoration_price_rank":78.9},
+            {"SBSNNM":"금호강중류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":83.9,"hydrology_rank":83.9,"restoration_price_rank":5.9},
+            {"SBSNNM":"진천천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":80.7,"hydrology_rank":80.7,"restoration_price_rank":3.3},
+            {"SBSNNM":"만봉천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":81.2,"past_wet_rank":69.6,"hydrology_rank":69.6,"restoration_price_rank":73.8},
+            {"SBSNNM":"경천댐","BBSNCD_한글":"금강권역","connectivity_rank":67,"past_wet_rank":95.5,"hydrology_rank":95.5,"restoration_price_rank":86.1},
+            {"SBSNNM":"형산강상류","BBSNCD_한글":"낙동강권역","connectivity_rank":69.8,"past_wet_rank":58,"hydrology_rank":58,"restoration_price_rank":51.8},
+            {"SBSNNM":"칠곡보","BBSNCD_한글":"낙동강권역","connectivity_rank":58.9,"past_wet_rank":46.4,"hydrology_rank":46.4,"restoration_price_rank":30.2},
+            {"SBSNNM":"남천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":76.3,"hydrology_rank":76.3,"restoration_price_rank":2.1},
+            {"SBSNNM":"와탄천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":75.8,"past_wet_rank":75.4,"hydrology_rank":75.4,"restoration_price_rank":77.8},
+            {"SBSNNM":"안양천중류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":74,"hydrology_rank":74,"restoration_price_rank":1.2},
+            {"SBSNNM":"임하댐상류","BBSNCD_한글":"낙동강권역","connectivity_rank":82.5,"past_wet_rank":43.3,"hydrology_rank":43.3,"restoration_price_rank":53.6},
+            {"SBSNNM":"곤양천","BBSNCD_한글":"낙동강권역","connectivity_rank":83,"past_wet_rank":67.5,"hydrology_rank":67.5,"restoration_price_rank":78.7},
+            {"SBSNNM":"청도천","BBSNCD_한글":"낙동강권역","connectivity_rank":74.9,"past_wet_rank":55.6,"hydrology_rank":55.6,"restoration_price_rank":58.8},
+            {"SBSNNM":"광주천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":77,"hydrology_rank":77,"restoration_price_rank":5.6},
+            {"SBSNNM":"주교천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":61.4,"past_wet_rank":86.7,"hydrology_rank":86.7,"restoration_price_rank":76.8},
+            {"SBSNNM":"증암천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":63.3,"past_wet_rank":49.8,"hydrology_rank":49.8,"restoration_price_rank":42.5},
+            {"SBSNNM":"고막원천상류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":76.3,"past_wet_rank":73.3,"hydrology_rank":73.3,"restoration_price_rank":79.2},
+            {"SBSNNM":"금호강하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":72.3,"hydrology_rank":72.3,"restoration_price_rank":2.8},
+            {"SBSNNM":"남강합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":66.5,"past_wet_rank":74.9,"hydrology_rank":74.9,"restoration_price_rank":72},
+            {"SBSNNM":"주진천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":67.7,"past_wet_rank":84.6,"hydrology_rank":84.6,"restoration_price_rank":82.9},
+            {"SBSNNM":"군내천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":86.7,"past_wet_rank":79.8,"hydrology_rank":79.8,"restoration_price_rank":97.3},
+            {"SBSNNM":"죽산보","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":68.9,"past_wet_rank":60.5,"hydrology_rank":60.5,"restoration_price_rank":60.4},
+            {"SBSNNM":"금강천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":88.8,"past_wet_rank":73.5,"hydrology_rank":73.5,"restoration_price_rank":93.8},
+            {"SBSNNM":"위천","BBSNCD_한글":"낙동강권역","connectivity_rank":70.5,"past_wet_rank":73,"hydrology_rank":73,"restoration_price_rank":75.7},
+            {"SBSNNM":"공촌천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":71.2,"hydrology_rank":71.2,"restoration_price_rank":3.8},
+            {"SBSNNM":"삽교방조제","BBSNCD_한글":"금강권역","connectivity_rank":72.8,"past_wet_rank":59.3,"hydrology_rank":59.3,"restoration_price_rank":66.6},
+            {"SBSNNM":"광양동천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":86,"past_wet_rank":7.4,"hydrology_rank":7.4,"restoration_price_rank":29.1},
+            {"SBSNNM":"백제보","BBSNCD_한글":"금강권역","connectivity_rank":90,"past_wet_rank":57.7,"hydrology_rank":57.7,"restoration_price_rank":83.6},
+            {"SBSNNM":"남천","BBSNCD_한글":"낙동강권역","connectivity_rank":68.4,"past_wet_rank":44.7,"hydrology_rank":44.7,"restoration_price_rank":49.2},
+            {"SBSNNM":"논산천합류전","BBSNCD_한글":"금강권역","connectivity_rank":61.7,"past_wet_rank":83.5,"hydrology_rank":83.5,"restoration_price_rank":81.3},
+            {"SBSNNM":"냉천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":74.4,"hydrology_rank":74.4,"restoration_price_rank":13.7},
+            {"SBSNNM":"구암천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":73.7,"past_wet_rank":81.6,"hydrology_rank":81.6,"restoration_price_rank":95.2},
+            {"SBSNNM":"노성천","BBSNCD_한글":"금강권역","connectivity_rank":67.5,"past_wet_rank":67.7,"hydrology_rank":67.7,"restoration_price_rank":75.2},
+            {"SBSNNM":"이포보","BBSNCD_한글":"한강권역","connectivity_rank":74.2,"past_wet_rank":52.2,"hydrology_rank":52.2,"restoration_price_rank":66.9},
+            {"SBSNNM":"백천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":67.9,"past_wet_rank":42.4,"hydrology_rank":42.4,"restoration_price_rank":50.9},
+            {"SBSNNM":"화원면","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":84.2,"past_wet_rank":67.2,"hydrology_rank":67.2,"restoration_price_rank":92.4},
+            {"SBSNNM":"강릉남대천","BBSNCD_한글":"한강권역","connectivity_rank":65.1,"past_wet_rank":61.4,"hydrology_rank":61.4,"restoration_price_rank":67.8},
+            {"SBSNNM":"강천보","BBSNCD_한글":"한강권역","connectivity_rank":62.8,"past_wet_rank":64.9,"hydrology_rank":64.9,"restoration_price_rank":69.4},
+            {"SBSNNM":"불갑천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":60,"past_wet_rank":93.2,"hydrology_rank":93.2,"restoration_price_rank":96.8},
+            {"SBSNNM":"대전천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":59.8,"hydrology_rank":59.8,"restoration_price_rank":3.5},
+            {"SBSNNM":"광천","BBSNCD_한글":"낙동강권역","connectivity_rank":73.5,"past_wet_rank":58.7,"hydrology_rank":58.7,"restoration_price_rank":76.2},
+            {"SBSNNM":"대서천","BBSNCD_한글":"낙동강권역","connectivity_rank":73.3,"past_wet_rank":32.2,"hydrology_rank":32.2,"restoration_price_rank":50.6},
+            {"SBSNNM":"용연댐","BBSNCD_한글":"낙동강권역","connectivity_rank":60.7,"past_wet_rank":61,"hydrology_rank":61,"restoration_price_rank":68},
+            {"SBSNNM":"구만수위표","BBSNCD_한글":"금강권역","connectivity_rank":59.3,"past_wet_rank":65.4,"hydrology_rank":65.4,"restoration_price_rank":71.7},
+            {"SBSNNM":"팔거천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":61.9,"hydrology_rank":61.9,"restoration_price_rank":9.1},
+            {"SBSNNM":"갑천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":61.7,"hydrology_rank":61.7,"restoration_price_rank":10},
+            {"SBSNNM":"고촌천","BBSNCD_한글":"낙동강권역","connectivity_rank":63.5,"past_wet_rank":51.5,"hydrology_rank":51.5,"restoration_price_rank":66.2},
+            {"SBSNNM":"동천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":53.8,"hydrology_rank":53.8,"restoration_price_rank":6.1},
+            {"SBSNNM":"자안천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":76.7,"hydrology_rank":76.7,"restoration_price_rank":29.3},
+            {"SBSNNM":"유구천","BBSNCD_한글":"금강권역","connectivity_rank":75.6,"past_wet_rank":36.4,"hydrology_rank":36.4,"restoration_price_rank":64.6},
+            {"SBSNNM":"지석천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":71.6,"hydrology_rank":71.6,"restoration_price_rank":25.3},
+            {"SBSNNM":"석성천","BBSNCD_한글":"금강권역","connectivity_rank":60.3,"past_wet_rank":59.6,"hydrology_rank":59.6,"restoration_price_rank":74.5},
+            {"SBSNNM":"송산방조제","BBSNCD_한글":"금강권역","connectivity_rank":64.7,"past_wet_rank":25,"hydrology_rank":25,"restoration_price_rank":44.6},
+            {"SBSNNM":"강정고령보","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":64.5,"hydrology_rank":64.5,"restoration_price_rank":20.7},
+            {"SBSNNM":"안양천하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":44.5,"hydrology_rank":44.5,"restoration_price_rank":1.4},
+            {"SBSNNM":"영천강합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":47,"hydrology_rank":47,"restoration_price_rank":5.2},
+            {"SBSNNM":"계양천합류후","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":67,"hydrology_rank":67,"restoration_price_rank":27},
+            {"SBSNNM":"남양방조제","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":65.1,"hydrology_rank":65.1,"restoration_price_rank":26},
+            {"SBSNNM":"포내천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":57.3,"hydrology_rank":57.3,"restoration_price_rank":19.5},
+            {"SBSNNM":"삼흥천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":68.6,"hydrology_rank":68.6,"restoration_price_rank":31.4},
+            {"SBSNNM":"삼천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":48.7,"hydrology_rank":48.7,"restoration_price_rank":11.7},
+            {"SBSNNM":"굴포천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":45.2,"hydrology_rank":45.2,"restoration_price_rank":9.6},
+            {"SBSNNM":"종천천","BBSNCD_한글":"금강권역","connectivity_rank":63.8,"past_wet_rank":32.4,"hydrology_rank":32.4,"restoration_price_rank":61.5},
+            {"SBSNNM":"성환천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":49.6,"hydrology_rank":49.6,"restoration_price_rank":15.1},
+            {"SBSNNM":"청계천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":34.8,"hydrology_rank":34.8,"restoration_price_rank":0.7},
+            {"SBSNNM":"장평천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":58.2,"hydrology_rank":58.2,"restoration_price_rank":24.2},
+            {"SBSNNM":"달천하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":70.7,"hydrology_rank":70.7,"restoration_price_rank":36.7},
+            {"SBSNNM":"천안천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":38,"hydrology_rank":38,"restoration_price_rank":4.5},
+            {"SBSNNM":"평택수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":35.4,"hydrology_rank":35.4,"restoration_price_rank":2.6},
+            {"SBSNNM":"무심천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":49.4,"hydrology_rank":49.4,"restoration_price_rank":16.8},
+            {"SBSNNM":"지천상류","BBSNCD_한글":"금강권역","connectivity_rank":68.2,"past_wet_rank":11.8,"hydrology_rank":11.8,"restoration_price_rank":47.6},
+            {"SBSNNM":"요천합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":65.4,"past_wet_rank":51,"hydrology_rank":51,"restoration_price_rank":84},
+            {"SBSNNM":"곡교천중류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":38.9,"hydrology_rank":38.9,"restoration_price_rank":7.2},
+            {"SBSNNM":"남대천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":56.1,"hydrology_rank":56.1,"restoration_price_rank":24.6},
+            {"SBSNNM":"영암방조제","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":66.5,"hydrology_rank":66.5,"restoration_price_rank":35.3},
+            {"SBSNNM":"영산강상류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":60,"hydrology_rank":60,"restoration_price_rank":29.5},
+            {"SBSNNM":"달성보","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":45.7,"hydrology_rank":45.7,"restoration_price_rank":15.6},
+            {"SBSNNM":"한강대교수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":29,"hydrology_rank":29,"restoration_price_rank":0.3},
+            {"SBSNNM":"동해면","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":50.5,"hydrology_rank":50.5,"restoration_price_rank":21.9},
+            {"SBSNNM":"석천","BBSNCD_한글":"금강권역","connectivity_rank":58,"past_wet_rank":50.3,"hydrology_rank":50.3,"restoration_price_rank":80.8},
+            {"SBSNNM":"웅천천","BBSNCD_한글":"금강권역","connectivity_rank":66.1,"past_wet_rank":41.2,"hydrology_rank":41.2,"restoration_price_rank":79.9},
+            {"SBSNNM":"의암댐","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":53.5,"hydrology_rank":53.5,"restoration_price_rank":27.9},
+            {"SBSNNM":"회야댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":36.1,"hydrology_rank":36.1,"restoration_price_rank":10.5},
+            {"SBSNNM":"탐진강하류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":50.1,"hydrology_rank":50.1,"restoration_price_rank":24.9},
+            {"SBSNNM":"한천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":63.5,"hydrology_rank":63.5,"restoration_price_rank":39},
+            {"SBSNNM":"병천교수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":69.1,"past_wet_rank":46.8,"hydrology_rank":46.8,"restoration_price_rank":91.5},
+            {"SBSNNM":"운계천합류전","BBSNCD_한글":"한강권역","connectivity_rank":60.5,"past_wet_rank":16.2,"hydrology_rank":16.2,"restoration_price_rank":53.9},
+            {"SBSNNM":"현산천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":63.1,"past_wet_rank":56.3,"hydrology_rank":56.3,"restoration_price_rank":96.6},
+            {"SBSNNM":"탄천하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":21.1,"hydrology_rank":21.1,"restoration_price_rank":0},
+            {"SBSNNM":"신령천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":81.2,"hydrology_rank":81.2,"restoration_price_rank":60.8},
+            {"SBSNNM":"마륜천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":59.1,"past_wet_rank":52.9,"hydrology_rank":52.9,"restoration_price_rank":91.7},
+            {"SBSNNM":"직지사천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":34.1,"hydrology_rank":34.1,"restoration_price_rank":14.2},
+            {"SBSNNM":"동연교수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":41.5,"hydrology_rank":41.5,"restoration_price_rank":22.3},
+            {"SBSNNM":"아천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":46.1,"hydrology_rank":46.1,"restoration_price_rank":27.2},
+            {"SBSNNM":"팔거천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":38.2,"hydrology_rank":38.2,"restoration_price_rank":20},
+            {"SBSNNM":"운산천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":54.5,"hydrology_rank":54.5,"restoration_price_rank":38.3},
+            {"SBSNNM":"원주천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":23.4,"hydrology_rank":23.4,"restoration_price_rank":7.7},
+            {"SBSNNM":"입장천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":48,"hydrology_rank":48,"restoration_price_rank":32.3},
+            {"SBSNNM":"성주수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":37.5,"hydrology_rank":37.5,"restoration_price_rank":22.1},
+            {"SBSNNM":"응천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":22,"hydrology_rank":22,"restoration_price_rank":7.9},
+            {"SBSNNM":"순천동천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":38.5,"hydrology_rank":38.5,"restoration_price_rank":24.4},
+            {"SBSNNM":"오산천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":48.2,"hydrology_rank":48.2,"restoration_price_rank":34.4},
+            {"SBSNNM":"금리천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":43.6,"hydrology_rank":43.6,"restoration_price_rank":30.4},
+            {"SBSNNM":"차천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":36.6,"hydrology_rank":36.6,"restoration_price_rank":23.5},
+            {"SBSNNM":"중선포천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":34.3,"hydrology_rank":34.3,"restoration_price_rank":21.4},
+            {"SBSNNM":"삽교천상류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":30.3,"hydrology_rank":30.3,"restoration_price_rank":17.5},
+            {"SBSNNM":"석문방조제","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":41.9,"hydrology_rank":41.9,"restoration_price_rank":30},
+            {"SBSNNM":"유등천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":16.4,"hydrology_rank":16.4,"restoration_price_rank":4.9},
+            {"SBSNNM":"안면도","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":27.6,"hydrology_rank":27.6,"restoration_price_rank":16.5},
+            {"SBSNNM":"쌍계천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":60.7,"hydrology_rank":60.7,"restoration_price_rank":49.7},
+            {"SBSNNM":"동창천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":74.7,"hydrology_rank":74.7,"restoration_price_rank":64.1},
+            {"SBSNNM":"화순천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":38.7,"hydrology_rank":38.7,"restoration_price_rank":28.6},
+            {"SBSNNM":"황강합류후","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":75.1,"hydrology_rank":75.1,"restoration_price_rank":65.5},
+            {"SBSNNM":"탄천상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":10.2,"hydrology_rank":10.2,"restoration_price_rank":1},
+            {"SBSNNM":"보청천하류","BBSNCD_한글":"금강권역","connectivity_rank":59.8,"past_wet_rank":31.5,"hydrology_rank":31.5,"restoration_price_rank":83.3},
+            {"SBSNNM":"길산천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":84.9,"hydrology_rank":84.9,"restoration_price_rank":77.3},
+            {"SBSNNM":"곡성천합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":64.2,"past_wet_rank":29.6,"hydrology_rank":29.6,"restoration_price_rank":88},
+            {"SBSNNM":"복하천중류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":12.5,"hydrology_rank":12.5,"restoration_price_rank":6.8},
+            {"SBSNNM":"종남천","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":28.7,"hydrology_rank":28.7,"restoration_price_rank":23},
+            {"SBSNNM":"춘천댐하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":39.2,"hydrology_rank":39.2,"restoration_price_rank":33.9},
+            {"SBSNNM":"양산천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":31,"hydrology_rank":31,"restoration_price_rank":26.3},
+            {"SBSNNM":"백천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":27.1,"hydrology_rank":27.1,"restoration_price_rank":22.8},
+            {"SBSNNM":"요천하류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":43.1,"hydrology_rank":43.1,"restoration_price_rank":40.4},
+            {"SBSNNM":"청룡천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":40.6,"hydrology_rank":40.6,"restoration_price_rank":38.1},
+            {"SBSNNM":"유성수위표","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":6.4,"hydrology_rank":6.4,"restoration_price_rank":4.2},
+            {"SBSNNM":"안성천상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":39.4,"hydrology_rank":39.4,"restoration_price_rank":37.4},
+            {"SBSNNM":"백곡천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":47.3,"hydrology_rank":47.3,"restoration_price_rank":45.3},
+            {"SBSNNM":"조천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":5.1,"hydrology_rank":5.1,"restoration_price_rank":3.1},
+            {"SBSNNM":"미호천중류","BBSNCD_한글":"금강권역","connectivity_rank":64.9,"past_wet_rank":10.6,"hydrology_rank":10.6,"restoration_price_rank":73.6},
+            {"SBSNNM":"압항천합류전","BBSNCD_한글":"한강권역","connectivity_rank":61.9,"past_wet_rank":17.4,"hydrology_rank":17.4,"restoration_price_rank":77.5},
+            {"SBSNNM":"신안군","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":88.3,"hydrology_rank":88.3,"restoration_price_rank":86.8},
+            {"SBSNNM":"소옥천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":13.6,"hydrology_rank":13.6,"restoration_price_rank":13.3},
+            {"SBSNNM":"전주천합류전","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":45.4,"hydrology_rank":45.4,"restoration_price_rank":45.1},
+            {"SBSNNM":"수산천","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":20.1,"hydrology_rank":20.1,"restoration_price_rank":20.5},
+            {"SBSNNM":"홍천수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":13.9,"hydrology_rank":13.9,"restoration_price_rank":14.7},
+            {"SBSNNM":"회야강","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":32,"hydrology_rank":32,"restoration_price_rank":33},
+            {"SBSNNM":"평림천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":48.4,"hydrology_rank":48.4,"restoration_price_rank":49.9},
+            {"SBSNNM":"한천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":51.7,"hydrology_rank":51.7,"restoration_price_rank":54.3},
+            {"SBSNNM":"죽천천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":29.9,"hydrology_rank":29.9,"restoration_price_rank":33.2},
+            {"SBSNNM":"황지천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":2.3,"hydrology_rank":2.3,"restoration_price_rank":6.3},
+            {"SBSNNM":"퇴계원수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":12.9,"hydrology_rank":12.9,"restoration_price_rank":17},
+            {"SBSNNM":"안동댐역조정지하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":3.7,"hydrology_rank":3.7,"restoration_price_rank":8.2},
+            {"SBSNNM":"양평수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":29.2,"hydrology_rank":29.2,"restoration_price_rank":34.9},
+            {"SBSNNM":"죽산천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":19.7,"hydrology_rank":19.7,"restoration_price_rank":25.6},
+            {"SBSNNM":"북천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":27.8,"hydrology_rank":27.8,"restoration_price_rank":33.7},
+            {"SBSNNM":"김천수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":42.9,"hydrology_rank":42.9,"restoration_price_rank":49},
+            {"SBSNNM":"북천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":3.9,"hydrology_rank":3.9,"restoration_price_rank":10.3},
+            {"SBSNNM":"아산방조제","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":35,"hydrology_rank":35,"restoration_price_rank":41.8},
+            {"SBSNNM":"대정읍","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":24.1,"hydrology_rank":24.1,"restoration_price_rank":31.1},
+            {"SBSNNM":"삼가천합류후","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":57,"hydrology_rank":57,"restoration_price_rank":65.2},
+            {"SBSNNM":"오대천상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":9.7,"hydrology_rank":9.7,"restoration_price_rank":18.8},
+            {"SBSNNM":"자호천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":54.9,"hydrology_rank":54.9,"restoration_price_rank":64.3},
+            {"SBSNNM":"소양강댐하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":26.9,"hydrology_rank":26.9,"restoration_price_rank":36.9},
+            {"SBSNNM":"공주보","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":21.5,"hydrology_rank":21.5,"restoration_price_rank":31.6},
+            {"SBSNNM":"요도천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":47.7,"hydrology_rank":47.7,"restoration_price_rank":58.5},
+            {"SBSNNM":"율곡천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":24.3,"hydrology_rank":24.3,"restoration_price_rank":35.5},
+            {"SBSNNM":"무한천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":42.2,"hydrology_rank":42.2,"restoration_price_rank":53.4},
+            {"SBSNNM":"학산천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":72.6,"past_wet_rank":9.9,"hydrology_rank":9.9,"restoration_price_rank":94.5},
+            {"SBSNNM":"전천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":28.5,"hydrology_rank":28.5,"restoration_price_rank":42},
+            {"SBSNNM":"청미천상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":4.4,"hydrology_rank":4.4,"restoration_price_rank":18.1},
+            {"SBSNNM":"작천보","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":25.7,"hydrology_rank":25.7,"restoration_price_rank":39.7},
+            {"SBSNNM":"신태인수위표","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":59.1,"hydrology_rank":59.1,"restoration_price_rank":73.4},
+            {"SBSNNM":"광산천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":19.4,"hydrology_rank":19.4,"restoration_price_rank":34.2},
+            {"SBSNNM":"곡성천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":55.4,"hydrology_rank":55.4,"restoration_price_rank":70.8},
+            {"SBSNNM":"황강상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":15.5,"hydrology_rank":15.5,"restoration_price_rank":32.5},
+            {"SBSNNM":"청도천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":45,"hydrology_rank":45,"restoration_price_rank":62},
+            {"SBSNNM":"복하천하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":28.3,"hydrology_rank":28.3,"restoration_price_rank":46.5},
+            {"SBSNNM":"양양남대천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":25.5,"hydrology_rank":25.5,"restoration_price_rank":44.4},
+            {"SBSNNM":"병천천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":16.9,"hydrology_rank":16.9,"restoration_price_rank":36},
+            {"SBSNNM":"용수천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":1.1,"hydrology_rank":1.1,"restoration_price_rank":20.9},
+            {"SBSNNM":"미성교수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":52.4,"hydrology_rank":52.4,"restoration_price_rank":72.7},
+            {"SBSNNM":"옥과천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":55.9,"hydrology_rank":55.9,"restoration_price_rank":76.4},
+            {"SBSNNM":"진위천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":22.7,"hydrology_rank":22.7,"restoration_price_rank":43.7},
+            {"SBSNNM":"금천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":48.9,"hydrology_rank":48.9,"restoration_price_rank":70.4},
+            {"SBSNNM":"둔포천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":40.1,"hydrology_rank":40.1,"restoration_price_rank":62.2},
+            {"SBSNNM":"단장천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":24.8,"hydrology_rank":24.8,"restoration_price_rank":46.9},
+            {"SBSNNM":"쌍계천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":67.9,"hydrology_rank":67.9,"restoration_price_rank":90.5},
+            {"SBSNNM":"한경면","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":18.3,"hydrology_rank":18.3,"restoration_price_rank":41.1},
+            {"SBSNNM":"조천읍","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":19.9,"hydrology_rank":19.9,"restoration_price_rank":42.7},
+            {"SBSNNM":"사연댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":30.6,"hydrology_rank":30.6,"restoration_price_rank":54.1},
+            {"SBSNNM":"장계천합류후","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":8.3,"hydrology_rank":8.3,"restoration_price_rank":31.8},
+            {"SBSNNM":"동천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":58.4,"hydrology_rank":58.4,"restoration_price_rank":82.2},
+            {"SBSNNM":"화북천","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":11.3,"hydrology_rank":11.3,"restoration_price_rank":35.1},
+            {"SBSNNM":"성산읍","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":29.4,"hydrology_rank":29.4,"restoration_price_rank":53.2},
+            {"SBSNNM":"평창강하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":32.9,"hydrology_rank":32.9,"restoration_price_rank":56.7},
+            {"SBSNNM":"완도군","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":46.6,"hydrology_rank":46.6,"restoration_price_rank":70.6},
+            {"SBSNNM":"사정천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":56.6,"hydrology_rank":56.6,"restoration_price_rank":81.5},
+            {"SBSNNM":"고막원천하류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":63.1,"hydrology_rank":63.1,"restoration_price_rank":88.2},
+            {"SBSNNM":"목계수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":53.1,"hydrology_rank":53.1,"restoration_price_rank":78.5},
+            {"SBSNNM":"공주수위표","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":40.8,"hydrology_rank":40.8,"restoration_price_rank":66.4},
+            {"SBSNNM":"미천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":55.2,"hydrology_rank":55.2,"restoration_price_rank":81},
+            {"SBSNNM":"홍천강하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":13.2,"hydrology_rank":13.2,"restoration_price_rank":39.3},
+            {"SBSNNM":"밀양수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":14.3,"hydrology_rank":14.3,"restoration_price_rank":40.7},
+            {"SBSNNM":"흑천합류전","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":41.7,"hydrology_rank":41.7,"restoration_price_rank":68.7},
+            {"SBSNNM":"죽계천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":33.6,"hydrology_rank":33.6,"restoration_price_rank":61.3},
+            {"SBSNNM":"이언천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":20.4,"hydrology_rank":20.4,"restoration_price_rank":48.8},
+            {"SBSNNM":"함평수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":58.9,"hydrology_rank":58.9,"restoration_price_rank":87.8},
+            {"SBSNNM":"여주수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":28,"hydrology_rank":28,"restoration_price_rank":57.1},
+            {"SBSNNM":"남평수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":26.4,"hydrology_rank":26.4,"restoration_price_rank":55.7},
+            {"SBSNNM":"해남방조제","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":63.3,"hydrology_rank":63.3,"restoration_price_rank":92.6},
+            {"SBSNNM":"봉황천하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":35.7,"hydrology_rank":35.7,"restoration_price_rank":65.9},
+            {"SBSNNM":"신천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":0.4,"hydrology_rank":0.4,"restoration_price_rank":30.9},
+            {"SBSNNM":"내성천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":5.3,"hydrology_rank":5.3,"restoration_price_rank":36.2},
+            {"SBSNNM":"효암천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":13.4,"hydrology_rank":13.4,"restoration_price_rank":44.8},
+            {"SBSNNM":"축산천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":9.5,"hydrology_rank":9.5,"restoration_price_rank":40.9},
+            {"SBSNNM":"시화방조제","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":0.2,"hydrology_rank":0.2,"restoration_price_rank":32.1},
+            {"SBSNNM":"상주보","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":31.3,"hydrology_rank":31.3,"restoration_price_rank":63.9},
+            {"SBSNNM":"임해진수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":8.8,"hydrology_rank":8.8,"restoration_price_rank":41.6},
+            {"SBSNNM":"미천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":62.6,"hydrology_rank":62.6,"restoration_price_rank":95.6},
+            {"SBSNNM":"춘천댐상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":54,"hydrology_rank":54,"restoration_price_rank":87.1},
+            {"SBSNNM":"아산방조제상류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":9.2,"hydrology_rank":9.2,"restoration_price_rank":42.3},
+            {"SBSNNM":"갑천상류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":3,"hydrology_rank":3,"restoration_price_rank":39.5},
+            {"SBSNNM":"구좌읍","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":14.8,"hydrology_rank":14.8,"restoration_price_rank":51.3},
+            {"SBSNNM":"괴산댐하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":33.4,"hydrology_rank":33.4,"restoration_price_rank":71.3},
+            {"SBSNNM":"예당댐","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":30.1,"hydrology_rank":30.1,"restoration_price_rank":68.3},
+            {"SBSNNM":"경천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":41,"hydrology_rank":41,"restoration_price_rank":80.1},
+            {"SBSNNM":"영월","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":7.1,"hydrology_rank":7.1,"restoration_price_rank":46.7},
+            {"SBSNNM":"위천합류전","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":25.9,"hydrology_rank":25.9,"restoration_price_rank":65.7},
+            {"SBSNNM":"람천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":53.3,"hydrology_rank":53.3,"restoration_price_rank":93.1},
+            {"SBSNNM":"의령천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":35.9,"hydrology_rank":35.9,"restoration_price_rank":75.9},
+            {"SBSNNM":"회천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":24.5,"hydrology_rank":24.5,"restoration_price_rank":64.8},
+            {"SBSNNM":"대화천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":32.7,"hydrology_rank":32.7,"restoration_price_rank":74.1},
+            {"SBSNNM":"금호방조제","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":51.9,"hydrology_rank":51.9,"restoration_price_rank":93.3},
+            {"SBSNNM":"대암댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":21.3,"hydrology_rank":21.3,"restoration_price_rank":62.7},
+            {"SBSNNM":"청미천중류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":17.6,"hydrology_rank":17.6,"restoration_price_rank":59.2},
+            {"SBSNNM":"천미천","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":33.1,"hydrology_rank":33.1,"restoration_price_rank":74.8},
+            {"SBSNNM":"주암댐","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":56.8,"hydrology_rank":56.8,"restoration_price_rank":98.7},
+            {"SBSNNM":"탑정댐","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":1.3,"hydrology_rank":1.3,"restoration_price_rank":43.9},
+            {"SBSNNM":"탐진강중류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":39.6,"hydrology_rank":39.6,"restoration_price_rank":82.4},
+            {"SBSNNM":"옥천천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":52.6,"hydrology_rank":52.6,"restoration_price_rank":96.1},
+            {"SBSNNM":"소옥천상류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":5.5,"hydrology_rank":5.5,"restoration_price_rank":49.5},
+            {"SBSNNM":"갈곡천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":40.3,"hydrology_rank":40.3,"restoration_price_rank":84.3},
+            {"SBSNNM":"섬강하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":8.5,"hydrology_rank":8.5,"restoration_price_rank":52.7},
+            {"SBSNNM":"영덕오십천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":18.7,"hydrology_rank":18.7,"restoration_price_rank":63.6},
+            {"SBSNNM":"태봉천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":44,"hydrology_rank":44,"restoration_price_rank":89.6},
+            {"SBSNNM":"용요천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":33.8,"hydrology_rank":33.8,"restoration_price_rank":79.6},
+            {"SBSNNM":"금성천","BBSNCD_한글":"제주권역","connectivity_rank":0,"past_wet_rank":14.1,"hydrology_rank":14.1,"restoration_price_rank":60.1},
+            {"SBSNNM":"충주조정지댐","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":20.6,"hydrology_rank":20.6,"restoration_price_rank":67.1},
+            {"SBSNNM":"봉황천합류후","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":16,"hydrology_rank":16,"restoration_price_rank":62.9},
+            {"SBSNNM":"임천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":6,"hydrology_rank":6,"restoration_price_rank":54.8},
+            {"SBSNNM":"남강댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":44.3,"hydrology_rank":44.3,"restoration_price_rank":93.6},
+            {"SBSNNM":"간현수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":7.6,"hydrology_rank":7.6,"restoration_price_rank":57.6},
+            {"SBSNNM":"수렴천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":19.2,"hydrology_rank":19.2,"restoration_price_rank":69.2},
+            {"SBSNNM":"신반천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":37.8,"hydrology_rank":37.8,"restoration_price_rank":88.4},
+            {"SBSNNM":"길안천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":43.8,"hydrology_rank":43.8,"restoration_price_rank":94.9},
+            {"SBSNNM":"병성천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":6.2,"hydrology_rank":6.2,"restoration_price_rank":58.1},
+            {"SBSNNM":"어천합류후","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":17.1,"hydrology_rank":17.1,"restoration_price_rank":69},
+            {"SBSNNM":"겸백수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":34.5,"hydrology_rank":34.5,"restoration_price_rank":86.4},
+            {"SBSNNM":"오동천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":39.9,"hydrology_rank":39.9,"restoration_price_rank":91.9},
+            {"SBSNNM":"한천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":7.8,"hydrology_rank":7.8,"restoration_price_rank":59.9},
+            {"SBSNNM":"삼가천","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":19,"hydrology_rank":19,"restoration_price_rank":71.5},
+            {"SBSNNM":"대강천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":42.6,"hydrology_rank":42.6,"restoration_price_rank":95.4},
+            {"SBSNNM":"벌교천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":36.8,"hydrology_rank":36.8,"restoration_price_rank":89.8},
+            {"SBSNNM":"남강댐상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":14.6,"hydrology_rank":14.6,"restoration_price_rank":71},
+            {"SBSNNM":"자룡천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":27.3,"hydrology_rank":27.3,"restoration_price_rank":83.8},
+            {"SBSNNM":"문곡천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":2.7,"hydrology_rank":2.7,"restoration_price_rank":60.6},
+            {"SBSNNM":"괘천합류후","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":2.5,"hydrology_rank":2.5,"restoration_price_rank":62.7},
+            {"SBSNNM":"경천합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":23.8,"hydrology_rank":23.8,"restoration_price_rank":85.4},
+            {"SBSNNM":"송천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":11.1,"hydrology_rank":11.1,"restoration_price_rank":72.9},
+            {"SBSNNM":"충주댐","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":37.1,"hydrology_rank":37.1,"restoration_price_rank":99.4},
+            {"SBSNNM":"양화천","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":0.9,"hydrology_rank":0.9,"restoration_price_rank":63.4},
+            {"SBSNNM":"화천댐하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":17.8,"hydrology_rank":17.8,"restoration_price_rank":80.6},
+            {"SBSNNM":"예천수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":4.6,"hydrology_rank":4.6,"restoration_price_rank":67.6},
+            {"SBSNNM":"화북댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":18,"hydrology_rank":18,"restoration_price_rank":81.7},
+            {"SBSNNM":"대호방조제","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":25.2,"hydrology_rank":25.2,"restoration_price_rank":90.8},
+            {"SBSNNM":"섬진강상류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":3.4,"hydrology_rank":3.4,"restoration_price_rank":69.7},
+            {"SBSNNM":"양천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":20.8,"hydrology_rank":20.8,"restoration_price_rank":87.3},
+            {"SBSNNM":"동복천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":26.2,"hydrology_rank":26.2,"restoration_price_rank":92.9},
+            {"SBSNNM":"내성천하류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":15,"hydrology_rank":15,"restoration_price_rank":82.6},
+            {"SBSNNM":"용담댐","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":16.7,"hydrology_rank":16.7,"restoration_price_rank":84.7},
+            {"SBSNNM":"거창위천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":22.9,"hydrology_rank":22.9,"restoration_price_rank":91},
+            {"SBSNNM":"용전천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":30.8,"hydrology_rank":30.8,"restoration_price_rank":99.1},
+            {"SBSNNM":"주천강하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":15.7,"hydrology_rank":15.7,"restoration_price_rank":85.7},
+            {"SBSNNM":"호탄수위표","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":22.2,"hydrology_rank":22.2,"restoration_price_rank":92.2},
+            {"SBSNNM":"오수천중류","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":18.5,"hydrology_rank":18.5,"restoration_price_rank":88.7},
+            {"SBSNNM":"영주댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":1.8,"hydrology_rank":1.8,"restoration_price_rank":72.4},
+            {"SBSNNM":"대종천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":26.6,"hydrology_rank":26.6,"restoration_price_rank":98},
+            {"SBSNNM":"운문댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":21.8,"hydrology_rank":21.8,"restoration_price_rank":94.2},
+            {"SBSNNM":"흥촌천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":23.2,"hydrology_rank":23.2,"restoration_price_rank":96.3},
+            {"SBSNNM":"오수천합류전","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":11.6,"hydrology_rank":11.6,"restoration_price_rank":85},
+            {"SBSNNM":"화천댐","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":12.2,"hydrology_rank":12.2,"restoration_price_rank":86.8},
+            {"SBSNNM":"영천댐","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":22.5,"hydrology_rank":22.5,"restoration_price_rank":97.5},
+            {"SBSNNM":"주천강시점","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":2,"hydrology_rank":2,"restoration_price_rank":77.1},
+            {"SBSNNM":"대청댐상류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":23.6,"hydrology_rank":23.6,"restoration_price_rank":100},
+            {"SBSNNM":"해리천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":9,"hydrology_rank":9,"restoration_price_rank":85.9},
+            {"SBSNNM":"안림천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":4.1,"hydrology_rank":4.1,"restoration_price_rank":83.1},
+            {"SBSNNM":"대가천","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":6.9,"hydrology_rank":6.9,"restoration_price_rank":87.5},
+            {"SBSNNM":"양구교수위표","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":10.4,"hydrology_rank":10.4,"restoration_price_rank":94.7},
+            {"SBSNNM":"치천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":4.8,"hydrology_rank":4.8,"restoration_price_rank":89.1},
+            {"SBSNNM":"죽고수위표","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":6.7,"hydrology_rank":6.7,"restoration_price_rank":91.2},
+            {"SBSNNM":"회천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":15.3,"hydrology_rank":15.3,"restoration_price_rank":99.8},
+            {"SBSNNM":"고흥천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":12.7,"hydrology_rank":12.7,"restoration_price_rank":97.3},
+            {"SBSNNM":"석교천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":10.9,"hydrology_rank":10.9,"restoration_price_rank":95.9},
+            {"SBSNNM":"대초천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":12,"hydrology_rank":12,"restoration_price_rank":97.7},
+            {"SBSNNM":"대아댐하류","BBSNCD_한글":"금강권역","connectivity_rank":0,"past_wet_rank":1.6,"hydrology_rank":1.6,"restoration_price_rank":90.3},
+            {"SBSNNM":"지장천하류","BBSNCD_한글":"한강권역","connectivity_rank":0,"past_wet_rank":5.8,"hydrology_rank":5.8,"restoration_price_rank":98.4},
+            {"SBSNNM":"대덕천","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":3.2,"hydrology_rank":3.2,"restoration_price_rank":98.2},
+            {"SBSNNM":"압록수위표","BBSNCD_한글":"섬진강-영산강권역","connectivity_rank":0,"past_wet_rank":0,"hydrology_rank":0,"restoration_price_rank":98.9},
+            {"SBSNNM":"영덕오십천상류","BBSNCD_한글":"낙동강권역","connectivity_rank":0,"past_wet_rank":0.6,"hydrology_rank":0.6,"restoration_price_rank":99.6}
+        ];
+
+        // --- 전역 변수 및 요소 가져오기 ---
+        const basinSelect = document.getElementById('basin-select');
+        const weightConnectivity = document.getElementById('weight-connectivity');
+        const weightHabitat = document.getElementById('weight-habitat');
+        const weightHydrology = document.getElementById('weight-hydrology');
+        const weightCost = document.getElementById('weight-cost');
+        const weightWarning = document.getElementById('weight-warning');
+        const tableBody = document.getElementById('result-table-body');
+        const chartTitle = document.getElementById('chart-title');
+        const tableTitle = document.getElementById('table-title');
+        
+        const ctx = document.getElementById('resultChart').getContext('2d');
+        let resultChart;
+
+        // --- 핵심 기능 함수 ---
+        
+        // 1. 차트 초기화 함수
+        function initializeChart() {
+            if (resultChart) {
+                resultChart.destroy();
+            }
+            resultChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: '서식처 연결성', data: [], backgroundColor: 'rgba(59, 130, 246, 0.8)' },
+                        { label: '서식처 기능향상', data: [], backgroundColor: 'rgba(245, 158, 11, 0.8)' },
+                        { label: '수문학적 기능', data: [], backgroundColor: 'rgba(16, 185, 129, 0.8)' },
+                        { label: '복원 비용', data: [], backgroundColor: 'rgba(239, 68, 68, 0.8)' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { stacked: true, beginAtZero: true, title: { display: true, text: '종합 점수' } },
+                        y: { stacked: true, ticks: { autoSkip: false } }
+                    },
+                    plugins: {
+                        legend: { display: true, position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.raw || 0;
+                                    return `${label}: ${value.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 2. 대시보드 업데이트 함수
+        function updateDashboard() {
+            const selectedBasin = basinSelect.value;
+            const wConn = parseFloat(weightConnectivity.value) || 0;
+            const wHabitat = parseFloat(weightHabitat.value) || 0;
+            const wHydro = parseFloat(weightHydrology.value) || 0;
+            const wCost = parseFloat(weightCost.value) || 0;
+
+            const totalWeight = wConn + wHydro + wHabitat + wCost;
+            if (Math.round(totalWeight) !== 100) {
+                weightWarning.textContent = `가중치의 합이 ${totalWeight}% 입니다. 100%로 맞춰주세요.`;
+            } else {
+                weightWarning.textContent = '';
+            }
+
+            // 1. 먼저 사용자가 선택한 대권역으로 전체 데이터를 필터링합니다.
+            const filteredData = watershedData.filter(d => d.BBSNCD_한글 === selectedBasin);
+            
+            // 2. 필터링된 데이터에 대해서만 가중치를 적용하여 최종 점수를 계산합니다.
+            const calculatedData = filteredData.map(d => {
+                const connScore = d.connectivity_rank * wConn / 100;
+                const habitatScore = d.past_wet_rank * wHabitat / 100; // 기능향상 점수 (임시)
+                const hydroScore = d.hydrology_rank * wHydro / 100;   // 수문기능 점수
+                const costScore = d.restoration_price_rank * wCost / 100;
+                const finalScore = connScore + hydroScore + habitatScore + costScore;
+                return { ...d, finalScore, connScore, hydroScore, habitatScore, costScore };
+            });
+
+            // 3. 계산된 점수를 기준으로 해당 대권역 내에서 내림차순 정렬합니다.
+            calculatedData.sort((a, b) => b.finalScore - a.finalScore);
+
+            // 4. 정렬된 결과에서 상위 20개를 선택합니다. (데이터가 20개 미만일 경우 전체 선택)
+            const topDataCount = Math.min(20, calculatedData.length);
+            const topData = calculatedData.slice(0, topDataCount);
+            
+            chartTitle.textContent = `${selectedBasin} 종합 순위 그래프 (상위 ${topDataCount}개)`;
+            tableTitle.textContent = `${selectedBasin} 상세 데이터 (상위 ${topDataCount}개)`;
+
+            // 그래프 정렬 로직: 점수 높은 것이 아래로 가도록
+            resultChart.data.labels = topData.map(d => d.SBSNNM);
+            resultChart.data.datasets[0].data = topData.map(d => d.connScore);
+            resultChart.data.datasets[1].data = topData.map(d => d.habitatScore);
+            resultChart.data.datasets[2].data = topData.map(d => d.hydroScore);
+            resultChart.data.datasets[3].data = topData.map(d => d.costScore);
+            
+            resultChart.update();
+
+            // 상세 데이터 테이블 업데이트 (상위 20개만 표시)
+            tableBody.innerHTML = '';
+            topData.forEach((d, index) => {
+                const row = `
+                    <tr class="${index < 3 ? 'bg-indigo-50' : ''}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${index + 1}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${d.SBSNNM}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${d.connectivity_rank.toFixed(1)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${d.past_wet_rank.toFixed(1)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${d.hydrology_rank.toFixed(1)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${d.restoration_price_rank.toFixed(1)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-indigo-700 bg-indigo-50">${d.finalScore.toFixed(2)}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        // 3. 대권역 드롭다운 메뉴 생성 함수
+        function populateBasinSelect() {
+            const basins = [...new Set(watershedData.map(item => item.BBSNCD_한글))];
+            basins.sort();
+            basinSelect.innerHTML = '';
+            basins.forEach(basin => {
+                const option = document.createElement('option');
+                option.value = basin;
+                option.textContent = basin;
+                basinSelect.appendChild(option);
+            });
+        }
+
+        // --- 이벤트 리스너 등록 ---
+        basinSelect.addEventListener('change', updateDashboard);
+        weightConnectivity.addEventListener('input', updateDashboard);
+        weightHabitat.addEventListener('input', updateDashboard);
+        weightHydrology.addEventListener('input', updateDashboard);
+        weightCost.addEventListener('input', updateDashboard);
+
+        // --- 초기 실행 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            populateBasinSelect();
+            initializeChart();
+            updateDashboard();
+        });
+    </script>
+</body>
+</html>
